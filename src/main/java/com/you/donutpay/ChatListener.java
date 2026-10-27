@@ -1,65 +1,59 @@
 package com.you.donutpay;
 
-import java.util.UUID;
+import net.fabricmc.fabric.api.client.message.v1.ClientReceiveMessageEvents;
+import net.minecraft.text.ClickEvent;
+import net.minecraft.text.HoverEvent;
+import net.minecraft.text.Style;
+import net.minecraft.text.Text;
+import net.minecraft.util.Formatting;
+
+import java.util.Locale;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
- * Listens to chat and detects messages where a player paid you.
- * DonutSMP prints amounts with suffixes, e.g. "Steve paid you $2.5m".
- *
- * Handled patterns:
- *   PlayerName paid you $1,000
- *   PlayerName paid you $2.5m
- *   You received $1,000 from PlayerName
+ * When someone pays you, appends a clickable [2x $amount] to the chat line.
+ * Clicking it runs: /pay <name> <double the amount>
  */
 public class ChatListener {
 
-    // number with optional commas/decimal, optional k/m/b/t suffix
-    private static final String AMOUNT = "\\$?\\s*([\\d,]*\\.?\\d+)\\s*([kmbt])?\\b";
-
+    // runs on text where every odd character/icon/special space was turned into one plain space
     private static final Pattern PAID_YOU = Pattern.compile(
-            "^(?:\\[.*?]\\s*)?([A-Za-z0-9_.]+)\\s+(?:paid|tipped|gave)\\s+you\\s+" + AMOUNT,
-            Pattern.CASE_INSENSITIVE
-    );
-
-    private static final Pattern RECEIVED_FROM = Pattern.compile(
-            "(?:received|got)\\s+" + AMOUNT + "\\s+from\\s+([A-Za-z0-9_.]+)",
+            "([A-Za-z0-9_.]+) (?:paid|tipped|gave) you ([\\d,]*\\.?\\d+) ?([kmbt])?(?![A-Za-z])",
             Pattern.CASE_INSENSITIVE
     );
 
     public static void register() {
-        net.fabricmc.fabric.api.client.message.v1.ClientReceiveMessageEvents.GAME.register(
-                (message, overlay) -> {
-                    // DonutSMP also shows payments in the action bar (overlay) -
-                    // skip those so each payment is only recorded once.
-                    if (!overlay) handleMessage(message.getString());
+        ClientReceiveMessageEvents.MODIFY_GAME.register((message, overlay) -> {
+            if (overlay) return message; // action bar can't be clicked
+
+            String clean = message.getString().replaceAll("[^A-Za-z0-9_.,]+", " ");
+            Matcher m = PAID_YOU.matcher(clean);
+
+            if (!m.find()) {
+                // says "paid you" but we couldn't read it -> show a red marker so we know
+                if (clean.toLowerCase(Locale.ROOT).contains(" paid you ")) {
+                    return message.copy().append(Text.literal(" [2x?]").formatted(Formatting.RED));
                 }
-        );
-    }
+                return message;
+            }
 
-    private static void handleMessage(String text) {
-        if (text == null || text.isEmpty()) return;
-        String t = text.trim();
-
-        Matcher m = PAID_YOU.matcher(t);
-        if (m.find()) {
+            String name = m.group(1);
             double amount = parseAmount(m.group(2), m.group(3));
-            if (amount > 0) record(m.group(1), amount);
-            return;
-        }
+            if (amount <= 0) return message;
 
-        m = RECEIVED_FROM.matcher(t);
-        if (m.find()) {
-            double amount = parseAmount(m.group(1), m.group(2));
-            if (amount > 0) record(m.group(3), amount);
-        }
-    }
+            long pay = Math.round(amount * 2);
+            String cmd = "/pay " + name + " " + pay;
 
-    private static void record(String name, double amount) {
-        DonutPayClient.STORE.addPayment(new PaymentStore.Payment(
-                UUID.randomUUID(), name, "tip", System.currentTimeMillis(), amount
-        ));
+            Text button = Text.literal(" [2x $" + fmt(pay) + "]").setStyle(Style.EMPTY
+                    .withColor(Formatting.GOLD)
+                    .withBold(true)
+                    .withClickEvent(new ClickEvent(ClickEvent.Action.RUN_COMMAND, cmd))
+                    .withHoverEvent(new HoverEvent(HoverEvent.Action.SHOW_TEXT,
+                            Text.literal("Click to run " + cmd))));
+
+            return message.copy().append(button);
+        });
     }
 
     private static double parseAmount(String num, String suffix) {
@@ -79,5 +73,17 @@ public class ChatListener {
             }
         }
         return v;
+    }
+
+    private static String fmt(double v) {
+        if (v >= 1e12) return trim(v / 1e12) + "T";
+        if (v >= 1e9) return trim(v / 1e9) + "B";
+        if (v >= 1e6) return trim(v / 1e6) + "M";
+        if (v >= 1e3) return trim(v / 1e3) + "K";
+        return trim(v);
+    }
+
+    private static String trim(double d) {
+        return String.format(Locale.ROOT, "%.2f", d).replaceAll("\\.?0+$", "");
     }
 }
