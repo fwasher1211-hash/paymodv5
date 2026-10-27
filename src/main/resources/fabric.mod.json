@@ -1,0 +1,16 @@
+{
+  "schemaVersion": 1,
+  "id": "donutpay2x",
+  "version": "${version}",
+  "name": "DonutPay 2x",
+  "description": "Detects players who pay you and gives you a 2x button to pay them back double.",
+  "environment": "client",
+  "entrypoint": {
+    "client": ["com.you.donutpay.DonutPayClient"]
+  },
+  "depends": {
+    "fabricloader": ">=0.16.0",
+    "fabric-api": "*",
+    "minecraft": "~1.21.1"
+  }
+}
